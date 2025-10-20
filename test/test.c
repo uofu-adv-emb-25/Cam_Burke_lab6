@@ -2,34 +2,83 @@
 #include <pico/stdlib.h>
 #include <stdint.h>
 #include <unity.h>
-#include "unity_config.h"
+
+
+
+// Semaphore libraries
+#include <FreeRTOS.h>
+#include <semphr.h>
+#include <task.h>
+
+#define TASK_PRIORITY_HIGH      ( tskIDLE_PRIORITY + 3UL )
+#define TASK_PRIORITY_MID       ( tskIDLE_PRIORITY + 2UL )
+#define TASK_PRIORITY_LOW       ( tskIDLE_PRIORITY + 1UL )
+
+#define MAIN_TASK_STACK_SIZE     1024
+#define MAIN_TASK_PRIORITY       ( tskIDLE_PRIORITY + 4 )
+#define TEST_TASK_STACK_SIZE     1024
+
+SemaphoreHandle_t share_semaphore;
 
 void setUp(void) {}
 
 void tearDown(void) {}
 
-void test_variable_assignment()
-{
-    int x = 1;
-    TEST_ASSERT_TRUE_MESSAGE(x == 1,"Variable assignment failed.");
+void high_priority_thread(void *) {
+    for(volatile int i = 0; i < 1000; i++);
 }
 
-void test_multiplication(void)
-{
-    int x = 30;
-    int y = 6;
-    int z = x / y;
-    TEST_ASSERT_TRUE_MESSAGE(z == 5, "Multiplication of two integers returned incorrect value.");
+void middle_priority_thread(void *) {
+    for(volatile int i = 0; i < 1000; i++);
 }
 
+void low_priority_thread(void *) {
+    xSemaphoreTake(share_semaphore, portMAX_DELAY);
+    for(volatile int i = 0; i < 1000; i++);
+    xSemaphoreGive(share_semaphore);
+}
+
+void higher_thread(void) {
+    
+    TaskHandle_t higher_T;  
+    xTaskCreate(high_priority_thread, "higher_thread", TEST_TASK_STACK_SIZE,
+                NULL, TASK_PRIORITY_HIGH, &higher_T);
+    vTaskDelay(1000);
+}
+
+void middle_thread(void) {
+    TaskHandle_t middle_T;  
+    xTaskCreate(middle_priority_thread, "middle_thread", TEST_TASK_STACK_SIZE,
+                NULL, TASK_PRIORITY_MID, &middle_T);
+
+}
+
+void lower_thread(void) {
+    TaskHandle_t lower_T;  
+    xTaskCreate(low_priority_thread, "lower_thread", TEST_TASK_STACK_SIZE,
+                NULL, TASK_PRIORITY_LOW, &lower_T);
+}
+ 
+void supervisor(void *){
+    while (1) {
+        share_semaphore = xSemaphoreCreateBinary();
+        printf("Start tests\n");
+        UNITY_BEGIN();
+        
+        
+        printf("All done!\n");
+        sleep_ms(5000);
+        UNITY_END();
+    }
+  
+}
 int main (void)
 {
     stdio_init_all();
-    sleep_ms(5000); // Give time for TTY to attach.
-    printf("Start tests\n");
-    UNITY_BEGIN();
-    RUN_TEST(test_variable_assignment);
-    RUN_TEST(test_multiplication);
     sleep_ms(5000);
-    return UNITY_END();
+
+    xTaskCreate(supervisor, "Supervisor_thread",
+                MAIN_TASK_STACK_SIZE, NULL, MAIN_TASK_PRIORITY, NULL);
+
+    vTaskStartScheduler(); // This function should never return.
 }
