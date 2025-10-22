@@ -20,26 +20,63 @@
 
 SemaphoreHandle_t share_semaphore;
 
+int status_number = -1; // 3 for higest task
+static volatile int log_arr[16];
+static volatile int log_index = 0;
+
 void setUp(void) {}
 
 void tearDown(void) {}
 
 void high_priority_thread(void *) {
+    printf("High priority thread waiting for semaphore\n");
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
-    for(volatile int i = 0; i < 1000; i++);
+    printf("High priority thread started\n");
+    for(volatile int i = 0; i < 100000; i++){
+        status_number = 3;
+        if (log_arr[log_index] != status_number) {
+            log_index++;
+            log_arr[log_index] = status_number;
+        }
+    }  
     xSemaphoreGive(share_semaphore);
-    vTaskDelete(NULL);
+    
+   
 }
 
 void middle_priority_thread(void *) {
-    for(volatile int i = 0; i < 1000; i++);
+    printf("Middle priority thread started\n");
+    for(volatile int i = 0; i < 200000; i++){
+        status_number = 2;
+        if (log_arr[log_index] != status_number) {
+            log_index++;
+            log_arr[log_index] = status_number;
+        }
+    }
+    
 }
 
 void low_priority_thread(void *) {
+    printf("Low priority thread waiting for semaphore\n");
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
-    for(volatile int i = 0; i < 1000; i++);
+    printf("Low priority thread started\n");
+    for(volatile int i = 0; i < 100000; i++){
+        status_number = 1;
+
+        if (log_index == 0){
+           log_arr[log_index] = status_number;
+           printf("Initial log arr[%d]: %d\n", log_index, log_arr[log_index]);
+        }
+        
+        else if (log_arr[log_index] != status_number) {
+            log_index++;
+            log_arr[log_index] = status_number;
+        }
+    }
+        
     xSemaphoreGive(share_semaphore);
-    vTaskDelete(NULL);
+    printf("Low priority thread finished\n");
+    
     
 }
 
@@ -48,7 +85,6 @@ void higher_thread(void) {
     TaskHandle_t higher_T;  
     xTaskCreate(high_priority_thread, "higher_thread", TEST_TASK_STACK_SIZE,
                 NULL, TASK_PRIORITY_HIGH, &higher_T);
-    vTaskDelay(1000);
 }
 
 void middle_thread(void) {
@@ -63,14 +99,25 @@ void lower_thread(void) {
     xTaskCreate(low_priority_thread, "lower_thread", TEST_TASK_STACK_SIZE,
                 NULL, TASK_PRIORITY_LOW, &lower_T);
 }
+
+
+void test_priority_inversion(void) {
+    int expected_log[] = {1, 2, 1, 3};
+    printf("Log index: %d\n", log_index);
+    for (int i = 0; i <= log_index; i++) {
+        printf("Log arr[%d]: %d, expected: %d\n", i, log_arr[i], expected_log[i]);
+        TEST_ASSERT_EQUAL_INT(expected_log[i], log_arr[i]);
+    }
+    
+    
+}
  
 void supervisor(void *){
     while (1) {
         share_semaphore = xSemaphoreCreateBinary();
-        xSemaphoreGive(share_semaphore);
+        
         printf("Start tests\n");
 
-        lower_thread();
         lower_thread();
         vTaskDelay(pdMS_TO_TICKS(10));
         higher_thread();
@@ -80,8 +127,11 @@ void supervisor(void *){
 
         UNITY_BEGIN();
         printf("All done!\n");
-        sleep_ms(5000);
+        RUN_TEST(test_priority_inversion);
         UNITY_END();
+
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        
     }
   
 }
@@ -94,4 +144,6 @@ int main (void)
                 MAIN_TASK_STACK_SIZE, NULL, MAIN_TASK_PRIORITY, NULL);
 
     vTaskStartScheduler(); // This function should never return.
+    
+    
 }
