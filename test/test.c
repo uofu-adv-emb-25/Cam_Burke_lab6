@@ -25,7 +25,10 @@ void setUp(void) {}
 void tearDown(void) {}
 
 void high_priority_thread(void *) {
+    xSemaphoreTake(share_semaphore, portMAX_DELAY);
     for(volatile int i = 0; i < 1000; i++);
+    xSemaphoreGive(share_semaphore);
+    vTaskDelete(NULL);
 }
 
 void middle_priority_thread(void *) {
@@ -36,6 +39,8 @@ void low_priority_thread(void *) {
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
     for(volatile int i = 0; i < 1000; i++);
     xSemaphoreGive(share_semaphore);
+    vTaskDelete(NULL);
+    
 }
 
 void higher_thread(void) {
@@ -62,10 +67,18 @@ void lower_thread(void) {
 void supervisor(void *){
     while (1) {
         share_semaphore = xSemaphoreCreateBinary();
+        xSemaphoreGive(share_semaphore);
         printf("Start tests\n");
+
+        lower_thread();
+        lower_thread();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        higher_thread();
+        vTaskDelay(pdMS_TO_TICKS(10));
+        middle_thread();
+
+
         UNITY_BEGIN();
-        
-        
         printf("All done!\n");
         sleep_ms(5000);
         UNITY_END();
