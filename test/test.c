@@ -20,9 +20,9 @@
 
 SemaphoreHandle_t share_semaphore;
 
-int status_number = -1; // 3 for higest task
+int status_number; // 3 for higest task
 static volatile int log_arr[16];
-static volatile int log_index = 0;
+static volatile int log_index;;
 
 void setUp(void) {}
 
@@ -39,9 +39,9 @@ void high_priority_thread(void *) {
             log_arr[log_index] = status_number;
         }
     }  
+    printf("High priority thread finished\n");
     xSemaphoreGive(share_semaphore);
-    
-   
+    vTaskDelete(NULL);
 }
 
 void middle_priority_thread(void *) {
@@ -53,19 +53,21 @@ void middle_priority_thread(void *) {
             log_arr[log_index] = status_number;
         }
     }
+    vTaskDelete(NULL);
     
 }
 
 void low_priority_thread(void *) {
     printf("Low priority thread waiting for semaphore\n");
+
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
     printf("Low priority thread started\n");
-    for(volatile int i = 0; i < 100000; i++){
+    for(volatile int i = 0; i < 1000000; i++){
         status_number = 1;
 
         if (log_index == 0){
            log_arr[log_index] = status_number;
-           printf("Initial log arr[%d]: %d\n", log_index, log_arr[log_index]);
+           
         }
         
         else if (log_arr[log_index] != status_number) {
@@ -73,9 +75,9 @@ void low_priority_thread(void *) {
             log_arr[log_index] = status_number;
         }
     }
-        
-    xSemaphoreGive(share_semaphore);
     printf("Low priority thread finished\n");
+    xSemaphoreGive(share_semaphore);
+    vTaskDelete(NULL);
     
     
 }
@@ -91,7 +93,7 @@ void middle_thread(void) {
     TaskHandle_t middle_T;  
     xTaskCreate(middle_priority_thread, "middle_thread", TEST_TASK_STACK_SIZE,
                 NULL, TASK_PRIORITY_MID, &middle_T);
-
+    
 }
 
 void lower_thread(void) {
@@ -115,7 +117,9 @@ void test_priority_inversion(void) {
 void supervisor(void *){
     while (1) {
         share_semaphore = xSemaphoreCreateBinary();
-        
+        log_index = 0;
+        status_number = 0;
+        xSemaphoreGive(share_semaphore); // Initialize semaphore as available
         printf("Start tests\n");
 
         lower_thread();
@@ -123,8 +127,9 @@ void supervisor(void *){
         higher_thread();
         vTaskDelay(pdMS_TO_TICKS(10));
         middle_thread();
-
-
+        vTaskDelay(pdMS_TO_TICKS(10));
+        
+        vTaskDelay(pdMS_TO_TICKS(10000));
         UNITY_BEGIN();
         printf("All done!\n");
         RUN_TEST(test_priority_inversion);
