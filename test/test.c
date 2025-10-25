@@ -53,8 +53,7 @@ void middle_priority_thread(void *) {
             log_arr[log_index] = status_number;
         }
     }
-    vTaskDelete(NULL);
-    
+    vTaskDelete(NULL);  
 }
 
 void low_priority_thread(void *) {
@@ -62,12 +61,11 @@ void low_priority_thread(void *) {
 
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
     printf("Low priority thread started\n");
-    for(volatile int i = 0; i < 1000000; i++){
+    for(volatile int i = 0; i < 2000000; i++){
         status_number = 1;
 
         if (log_index == 0){
            log_arr[log_index] = status_number;
-           
         }
         
         else if (log_arr[log_index] != status_number) {
