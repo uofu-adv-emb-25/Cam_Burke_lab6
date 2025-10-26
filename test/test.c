@@ -41,10 +41,6 @@ void setUp(void) {}
 void tearDown(void) {}
 
 
-
-
-
-
 static inline void log_push(int v) {            // Tells the compiler to put code where its called.
     taskENTER_CRITICAL();                       // Disable interrupts
         if (last_value != v) {
