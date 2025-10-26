@@ -8,7 +8,9 @@
 // Semaphore libraries
 #include <FreeRTOS.h>
 #include <semphr.h>
-#include <task.h>
+#include "task.h"
+#include <pico/time.h>
+
 
 #define MAIN_TASK_PRIORITY      ( tskIDLE_PRIORITY + 4) // Highest priority
 #define TASK_PRIORITY_HIGH      ( tskIDLE_PRIORITY + 3)
@@ -17,6 +19,7 @@
 
 #define MAIN_TASK_STACK_SIZE     1024
 #define TEST_TASK_STACK_SIZE     1024
+
 
 SemaphoreHandle_t share_semaphore;
 SemaphoreHandle_t mutex;
@@ -38,6 +41,10 @@ void setUp(void) {}
 void tearDown(void) {}
 
 
+
+
+
+
 static inline void log_push(int v) {            // Tells the compiler to put code where its called.
     taskENTER_CRITICAL();                       // Disable interrupts
         if (last_value != v) {
@@ -55,8 +62,6 @@ static inline void mutex_log_push(int v) {      // Tells the compiler to put cod
         }
     taskEXIT_CRITICAL();
 }
-
-
 
 void high_priority_thread(void *) {
     printf("High priority thread waiting for semaphore\n");
@@ -188,7 +193,111 @@ void test_priority_inversion_mutex(void) {
         TEST_ASSERT_EQUAL_INT(expected_log[i], mutex_log_arr[i]);
     }
 }
- 
+
+// Activity 2: Compteting Threads
+void busy_busy(void *)
+{
+    for (int i = 0; ; i++);
+}
+
+void busy_yield(void *)
+{
+    for (int i = 0; ; i++) {
+        taskYIELD();
+    }
+}
+
+void competing_busy(TaskFunction_t t1_func, TaskFunction_t t2_func, uint64_t *t1_exec_time, uint64_t *t2_exec_time, uint64_t t1_t2_delay_ms, BaseType_t t1_priority, BaseType_t t2_priority) {
+    TaskHandle_t t1;
+    TaskHandle_t t2;
+    
+    TickType_t start_ticks = xTaskGetTickCount();
+    uint64_t start_count = portGET_RUN_TIME_COUNTER_VALUE();
+
+    xTaskCreate(t1_func, "first_thread", TEST_TASK_STACK_SIZE,
+            NULL, t1_priority, &t1);
+
+            
+    vTaskDelay(pdMS_TO_TICKS(t1_t2_delay_ms)); // Delay before starting second task
+
+
+    xTaskCreate(t2_func, "second_thread", TEST_TASK_STACK_SIZE,
+                NULL, t2_priority, &t2);
+
+    vTaskDelay(pdMS_TO_TICKS(1000)); 
+    
+    TaskStatus_t t1_status, t2_status;
+
+    TaskStatus_t s1, s2;
+    vTaskGetInfo(t1, &s1, pdTRUE, eInvalid);   // pdTRUE -> include ulRunTimeCounter
+    vTaskGetInfo(t2, &s2, pdTRUE, eInvalid);
+
+    *t1_exec_time = s1.ulRunTimeCounter;       // units = whatever portGET_RUN_TIME_COUNTER_VALUE returns (µs here)
+    *t2_exec_time = s2.ulRunTimeCounter;
+    
+    printf("Task 1 Runtime: %llu\n", *t1_exec_time);
+    printf("Task 2 Runtime: %llu\n", *t2_exec_time);
+
+    vTaskDelete(t1);
+    vTaskDelete(t2);
+}
+
+void both_busy_busy(void) {
+    uint64_t time_1 = 0;
+    uint64_t time_2 = 0;
+    
+    competing_busy(busy_busy, busy_busy, &time_1, &time_2, 0, TASK_PRIORITY_LOW, TASK_PRIORITY_LOW);
+    TEST_ASSERT(time_1 > 400000 && time_1 < 600000);
+    TEST_ASSERT(time_2 > 400000 && time_2 < 600000);
+}
+
+void both_busy_yield(void) {
+    uint64_t time_1;
+    uint64_t time_2;
+    
+    competing_busy(busy_yield, busy_yield, &time_1, &time_2, 0, TASK_PRIORITY_LOW, TASK_PRIORITY_LOW);
+    TEST_ASSERT(time_1 > 400000 && time_1 < 600000);
+    TEST_ASSERT(time_2 > 400000 && time_2 < 600000);
+}
+
+void t1_busy_t2_yield(void) {
+    uint64_t time_1;
+    uint64_t time_2;
+    
+    competing_busy(busy_busy, busy_yield, &time_1, &time_2, 0, TASK_PRIORITY_LOW, TASK_PRIORITY_LOW);
+    TEST_ASSERT(time_1 > 900000);
+    TEST_ASSERT(time_2 < 100000);
+}
+
+
+void busy_busy_different_priority_high_first(void) {
+    uint64_t time_1;
+    uint64_t time_2;
+    
+    competing_busy(busy_busy, busy_busy, &time_1, &time_2, 100, TASK_PRIORITY_HIGH, TASK_PRIORITY_LOW);
+    TEST_ASSERT(time_1 > 900000);
+    TEST_ASSERT(time_2 == 0);
+}
+
+
+void busy_busy_different_priority_low_first(void) {
+    uint64_t time_1;
+    uint64_t time_2;
+    
+    competing_busy(busy_busy, busy_busy, &time_1, &time_2, 0, TASK_PRIORITY_LOW, TASK_PRIORITY_HIGH);
+    TEST_ASSERT(time_1 < 100000);
+    TEST_ASSERT(time_2 > 900000);
+}
+
+void busy_yield_different_priority(void) {
+    uint64_t time_1;
+    uint64_t time_2;
+    
+    competing_busy(busy_yield, busy_yield, &time_1, &time_2, 0, TASK_PRIORITY_LOW, TASK_PRIORITY_HIGH);
+    TEST_ASSERT(time_1 < 100000);
+    TEST_ASSERT(time_2 > 900000);
+}
+
 
 void supervisor(void *){
     while (1) {
@@ -202,8 +311,6 @@ void supervisor(void *){
             log_arr[i] = 0;
         }
         
-        
-
         lower_thread();
         vTaskDelay(pdMS_TO_TICKS(10));
         higher_thread();
@@ -238,12 +345,21 @@ void supervisor(void *){
         RUN_TEST(test_priority_inversion);
         RUN_TEST(test_priority_inversion_mutex);
 
+        RUN_TEST(both_busy_busy);
+        RUN_TEST(both_busy_yield);
+        RUN_TEST(t1_busy_t2_yield);
+
+        RUN_TEST(busy_busy_different_priority_high_first);
+        RUN_TEST(busy_busy_different_priority_low_first);
+        RUN_TEST(busy_yield_different_priority);
+
         printf("All done!\n");
         UNITY_END();
 
         vTaskDelay(pdMS_TO_TICKS(5000));     
     }
 }
+
 
 
 int main (void)
