@@ -10,12 +10,12 @@
 #include <semphr.h>
 #include <task.h>
 
-#define TASK_PRIORITY_HIGH      ( tskIDLE_PRIORITY + 3UL )
-#define TASK_PRIORITY_MID       ( tskIDLE_PRIORITY + 2UL )
-#define TASK_PRIORITY_LOW       ( tskIDLE_PRIORITY + 1UL )
+#define MAIN_TASK_PRIORITY      ( tskIDLE_PRIORITY + 4) // Highest priority
+#define TASK_PRIORITY_HIGH      ( tskIDLE_PRIORITY + 3)
+#define TASK_PRIORITY_MID       ( tskIDLE_PRIORITY + 2)
+#define TASK_PRIORITY_LOW       ( tskIDLE_PRIORITY + 1) // Lowest priority
 
 #define MAIN_TASK_STACK_SIZE     1024
-#define MAIN_TASK_PRIORITY       ( tskIDLE_PRIORITY + 4 )
 #define TEST_TASK_STACK_SIZE     1024
 
 SemaphoreHandle_t share_semaphore;
@@ -26,14 +26,35 @@ int status_number; // 3 for higest task, 2 for mid, 1 for lowest
 // Inversion log
 static volatile int log_arr[16];
 static volatile int log_index;
+static volatile int last_value;
 
 // Mutex log
 static volatile int mutex_log_arr[16];
 static volatile int mutex_log_index;
+static volatile int last_mutex_value;
 
 void setUp(void) {}
 
 void tearDown(void) {}
+
+
+static inline void log_push(int v) {            // Tells the compiler to put code where its called.
+    taskENTER_CRITICAL();                       // Disable interrupts
+        if (last_value != v) {
+            log_arr[log_index++] = v;
+            last_value = v;                     // Update last logged value
+        }
+    taskEXIT_CRITICAL();
+}
+
+static inline void mutex_log_push(int v) {      // Tells the compiler to put code where its called.
+    taskENTER_CRITICAL();                       // Disable interrupts
+        if (last_mutex_value != v) {
+            mutex_log_arr[mutex_log_index++] = v;
+            last_mutex_value = v;               // Update last logged value
+        }
+    taskEXIT_CRITICAL();
+}
 
 
 
@@ -42,11 +63,7 @@ void high_priority_thread(void *) {
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
     printf("High priority thread started\n");
     for(volatile int i = 0; i < 100000; i++){
-        status_number = 3;
-        if (log_arr[log_index] != status_number) {
-            log_index++;
-            log_arr[log_index] = status_number;
-        }
+        log_push(3);
     }  
     printf("High priority thread finished\n");
     xSemaphoreGive(share_semaphore);
@@ -57,11 +74,7 @@ void high_priority_thread(void *) {
 void middle_priority_thread(void *) {
     printf("Middle priority thread started\n");
     for(volatile int i = 0; i < 200000; i++){
-        status_number = 2;
-        if (log_arr[log_index] != status_number) {
-            log_index++;
-            log_arr[log_index] = status_number;
-        }
+        log_push(2);
     }
     vTaskDelete(NULL);  
 }
@@ -73,16 +86,7 @@ void low_priority_thread(void *) {
     xSemaphoreTake(share_semaphore, portMAX_DELAY);
     printf("Low priority thread started\n");
     for(volatile int i = 0; i < 2000000; i++){
-        status_number = 1;
-
-        if (log_index == 0){
-           log_arr[log_index] = status_number;
-        }
-        
-        else if (log_arr[log_index] != status_number) {
-            log_index++;
-            log_arr[log_index] = status_number;
-        }
+        log_push(1);
     }
     printf("Low priority thread finished\n");
     xSemaphoreGive(share_semaphore);
@@ -117,11 +121,7 @@ void high_priority_thread_mutex(void *) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     printf("Mutex High Start\n");
     for(volatile int i = 0; i < 100000; i++){
-        status_number = 3;
-        if (mutex_log_arr[mutex_log_index] != status_number) {
-            mutex_log_index++;
-            mutex_log_arr[mutex_log_index] = status_number;
-        }
+        mutex_log_push(3);
     }  
     printf("Mutex High Finished\n");
     xSemaphoreGive(mutex);
@@ -132,11 +132,7 @@ void high_priority_thread_mutex(void *) {
 void middle_priority_thread_mutex(void *) {
     printf("Mutex Middle Started\n");
     for(volatile int i = 0; i < 200000; i++){
-        status_number = 2;
-        if (mutex_log_arr[mutex_log_index] != status_number) {
-            mutex_log_index++;
-            mutex_log_arr[mutex_log_index] = status_number;
-        }
+        mutex_log_push(2);
     }
     vTaskDelete(NULL);  
 }
@@ -148,16 +144,7 @@ void low_priority_thread_mutex(void *) {
     xSemaphoreTake(mutex, portMAX_DELAY);
     printf("Low Mutex Started\n");
     for(volatile int i = 0; i < 2000000; i++){
-        status_number = 1;
-
-        if (mutex_log_index == 0){
-           mutex_log_arr[mutex_log_index] = status_number;
-        }
-        
-        else if (mutex_log_arr[mutex_log_index] != status_number) {
-            mutex_log_index++;
-            mutex_log_arr[mutex_log_index] = status_number;
-        }
+        mutex_log_push(1);
     }
     printf("Low Mutex Finished\n");
     xSemaphoreGive(mutex);
@@ -210,10 +197,11 @@ void supervisor(void *){
         share_semaphore = xSemaphoreCreateBinary();
         log_index = 0;
         status_number = 0;
+        xSemaphoreGive(share_semaphore); // Initialize semaphore as available
         for(int i = 0; i < 16; i++) {
             log_arr[i] = 0;
         }
-        xSemaphoreGive(share_semaphore); // Initialize semaphore as available
+        
         
 
         lower_thread();
